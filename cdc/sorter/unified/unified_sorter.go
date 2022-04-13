@@ -17,6 +17,8 @@ import (
 	"context"
 	"sync"
 
+	"github.com/pingcap/tiflow/debug"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
@@ -170,13 +172,15 @@ func (s *Sorter) Run(ctx context.Context) error {
 	})
 
 	errg.Go(func() error {
-		return printError(runMerger(subctx, numConcurrentHeaps, heapSorterCollectCh, s.outputCh, ioCancelFunc))
+		return printError(runMerger(context.WithValue(subctx, "metrics.table", s.metricsInfo.tableName),
+			numConcurrentHeaps, heapSorterCollectCh, s.outputCh, ioCancelFunc))
 	})
 
 	errg.Go(func() error {
 		captureAddr := util.CaptureAddrFromCtx(ctx)
 		changefeedID := util.ChangefeedIDFromCtx(ctx)
 
+		metricsInputChanSize := debug.InspectChanSize.WithLabelValues(changefeedID, s.metricsInfo.tableName, "sorter.input")
 		metricSorterConsumeCount := sorterConsumeCount.MustCurryWith(map[string]string{
 			"capture":    captureAddr,
 			"changefeed": changefeedID,
@@ -188,6 +192,7 @@ func (s *Sorter) Run(ctx context.Context) error {
 			case <-subctx.Done():
 				return subctx.Err()
 			case event := <-s.inputCh:
+				metricsInputChanSize.Dec()
 				if event.RawKV != nil && event.RawKV.OpType == model.OpTypeResolved {
 					// broadcast resolved events
 					for _, sorter := range heapSorters {
@@ -242,6 +247,7 @@ func (s *Sorter) AddEntry(ctx context.Context, entry *model.PolymorphicEvent) {
 		return
 	case <-s.closeCh:
 	case s.inputCh <- entry:
+		debug.InspectChanSize.WithLabelValues(s.metricsInfo.changeFeedID, s.metricsInfo.tableName, "sorter.input").Inc()
 	}
 }
 
@@ -257,6 +263,7 @@ func (s *Sorter) TryAddEntry(ctx context.Context, entry *model.PolymorphicEvent)
 	}
 	select {
 	case s.inputCh <- entry:
+		debug.InspectChanSize.WithLabelValues(s.metricsInfo.changeFeedID, s.metricsInfo.tableName, "sorter.input").Inc()
 		return true, nil
 	default:
 		return false, nil

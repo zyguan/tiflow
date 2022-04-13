@@ -22,6 +22,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/tiflow/debug"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
@@ -39,7 +41,9 @@ import (
 func runMerger(ctx context.Context, numSorters int, in <-chan *flushTask, out chan *model.PolymorphicEvent, onExit func()) error {
 	captureAddr := util.CaptureAddrFromCtx(ctx)
 	changefeedID := util.ChangefeedIDFromCtx(ctx)
+	table, _ := ctx.Value("metrics.table").(string)
 
+	metricsOutChanSize := debug.InspectChanSize.WithLabelValues(changefeedID, table, "sorter.output")
 	metricSorterEventCount := sorter.EventCount.MustCurryWith(map[string]string{
 		"capture":    captureAddr,
 		"changefeed": changefeedID,
@@ -118,6 +122,7 @@ func runMerger(ctx context.Context, numSorters int, in <-chan *flushTask, out ch
 		case <-ctx.Done():
 			return ctx.Err()
 		case out <- model.NewResolvedPolymorphicEvent(0, ts):
+			metricsOutChanSize.Inc()
 			metricSorterEventCount.WithLabelValues("resolved").Inc()
 			metricSorterResolvedTsGauge.Set(float64(oracle.ExtractPhysical(ts)))
 			return nil
@@ -313,6 +318,7 @@ func runMerger(ctx context.Context, numSorters int, in <-chan *flushTask, out ch
 				case <-ctx.Done():
 					return ctx.Err()
 				case out <- event:
+					metricsOutChanSize.Inc()
 					metricSorterEventCount.WithLabelValues("kv").Inc()
 				}
 			}

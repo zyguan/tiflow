@@ -16,6 +16,9 @@ package pipeline
 import (
 	stdContext "context"
 
+	"github.com/pingcap/tiflow/debug"
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/pingcap/tiflow/pkg/context"
@@ -46,7 +49,7 @@ func newNodeRunner(name string, node Node, previous runner, outputChanSize int) 
 }
 
 func (r *nodeRunner) run(ctx context.Context) error {
-	nodeCtx := NewNodeContext(ctx, Message{}, r.outputCh)
+	nodeCtx := NewNodeContextWithName(ctx, r.name, Message{}, r.outputCh)
 	defer close(r.outputCh)
 	defer func() {
 		err := r.node.Destroy(nodeCtx)
@@ -59,7 +62,15 @@ func (r *nodeRunner) run(ctx context.Context) error {
 		return err
 	}
 	// TODO: We can add monitoring for execution time and channel length here uniformly
+	table, _ := ctx.Value("metrics.table").(string)
+	var metricsChanSize prometheus.Gauge
+	if _, ok := r.previous.(headRunner); !ok {
+		metricsChanSize = debug.InspectChanSize.WithLabelValues(ctx.ChangefeedVars().ID, table, "node."+r.previous.getName()+".output")
+	}
 	for msg := range r.previous.getOutputCh() {
+		if metricsChanSize != nil {
+			metricsChanSize.Dec()
+		}
 		err := r.node.Receive(withMessage(nodeCtx, msg))
 		if err != nil {
 			return err

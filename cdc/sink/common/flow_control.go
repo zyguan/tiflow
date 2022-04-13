@@ -16,6 +16,10 @@ package common
 import (
 	"sync"
 	"sync/atomic"
+	"time"
+
+	"github.com/pingcap/tiflow/debug"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/edwingeng/deque"
 	"github.com/pingcap/errors"
@@ -36,15 +40,18 @@ type TableMemoryQuota struct {
 	Consumed uint64
 
 	cond *sync.Cond
+
+	metricBlockingDuration prometheus.Observer
 }
 
 // NewTableMemoryQuota creates a new TableMemoryQuota
 // quota: max advised memory consumption in bytes.
-func NewTableMemoryQuota(quota uint64) *TableMemoryQuota {
+func NewTableMemoryQuota(changefeed string, tableName string, quota uint64) *TableMemoryQuota {
 	ret := &TableMemoryQuota{
-		Quota:    quota,
-		mu:       sync.Mutex{},
-		Consumed: 0,
+		Quota:                  quota,
+		mu:                     sync.Mutex{},
+		Consumed:               0,
+		metricBlockingDuration: debug.InspectFlowBlockingDuration.WithLabelValues(changefeed, tableName),
 	}
 
 	ret.cond = sync.NewCond(&ret.mu)
@@ -59,10 +66,19 @@ func (c *TableMemoryQuota) ConsumeWithBlocking(nBytes uint64, blockCallBack func
 	if nBytes >= c.Quota {
 		return cerrors.ErrFlowControllerEventLargerThanQuota.GenWithStackByArgs(nBytes, c.Quota)
 	}
-
+	var (
+		blocked   = false
+		startTime = time.Now()
+	)
+	defer func() {
+		if blocked {
+			c.metricBlockingDuration.Observe(time.Since(startTime).Seconds())
+		}
+	}()
 	c.mu.Lock()
 	if c.Consumed+nBytes >= c.Quota {
 		c.mu.Unlock()
+		blocked = true
 		err := blockCallBack()
 		if err != nil {
 			return errors.Trace(err)
@@ -82,6 +98,7 @@ func (c *TableMemoryQuota) ConsumeWithBlocking(nBytes uint64, blockCallBack func
 		if c.Consumed+nBytes < c.Quota {
 			break
 		}
+		blocked = true
 		c.cond.Wait()
 	}
 
@@ -154,9 +171,9 @@ type commitTsSizeEntry struct {
 }
 
 // NewTableFlowController creates a new TableFlowController
-func NewTableFlowController(quota uint64) *TableFlowController {
+func NewTableFlowController(changefeed string, tableName string, quota uint64) *TableFlowController {
 	return &TableFlowController{
-		memoryQuota: NewTableMemoryQuota(quota),
+		memoryQuota: NewTableMemoryQuota(changefeed, tableName, quota),
 		queue:       deque.NewDeque(),
 	}
 }

@@ -193,7 +193,7 @@ func NewTablePipeline(ctx cdcContext.Context,
 		zap.String("table-name", tableName),
 		zap.Int64("table-id", tableID),
 		zap.Uint64("quota", perTableMemoryQuota))
-	flowController := common.NewTableFlowController(perTableMemoryQuota)
+	flowController := common.NewTableFlowController(ctx.ChangefeedVars().ID, tableName, perTableMemoryQuota)
 	config := ctx.ChangefeedVars().Info.Config
 	cyclicEnabled := config.Cyclic != nil && config.Cyclic.IsEnabled()
 	runnerSize := defaultRunnersSize
@@ -201,6 +201,7 @@ func NewTablePipeline(ctx cdcContext.Context,
 		runnerSize++
 	}
 
+	ctx = cdcContext.WithStd(ctx, context.WithValue(ctx, "metrics.table", tableName))
 	p := pipeline.NewPipeline(ctx, 500*time.Millisecond, runnerSize, defaultOutputChannelSize)
 	sorterNode :=
 		newSorterNode(tableName, tableID, replicaInfo.StartTs, flowController, mounter, replConfig)

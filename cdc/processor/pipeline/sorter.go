@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/tiflow/debug"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
@@ -153,6 +155,9 @@ func (n *sorterNode) StartActorNode(ctx pipeline.NodeContext, isTableActorMode b
 		lastSendResolvedTsTime := time.Now() // the time at which we last sent a resolved-ts.
 		lastCRTs := uint64(0)                // the commit-ts of the last row changed we sent.
 
+		metricsSorterOut := debug.InspectDuration.WithLabelValues(ctx.ChangefeedVars().ID, n.tableName, "sorter.output")
+		metricsSorterMnt := debug.InspectDuration.WithLabelValues(ctx.ChangefeedVars().ID, n.tableName, "sorter.output.mount")
+		metricsSorterOutputChanSize := debug.InspectChanSize.WithLabelValues(ctx.ChangefeedVars().ID, n.tableName, "sorter.output")
 		metricsTableMemoryHistogram := tableMemoryHistogram.WithLabelValues(ctx.ChangefeedVars().ID, ctx.GlobalVars().CaptureInfo.AdvertiseAddr)
 		metricsTicker := time.NewTicker(flushMemoryMetricsDuration)
 		defer metricsTicker.Stop()
@@ -164,6 +169,8 @@ func (n *sorterNode) StartActorNode(ctx pipeline.NodeContext, isTableActorMode b
 			case <-metricsTicker.C:
 				metricsTableMemoryHistogram.Observe(float64(n.flowController.GetConsumption()))
 			case msg, ok := <-eventSorter.Output():
+				startTime := time.Now()
+				metricsSorterOutputChanSize.Dec()
 				if !ok {
 					// sorter output channel closed
 					return nil
@@ -205,6 +212,7 @@ func (n *sorterNode) StartActorNode(ctx pipeline.NodeContext, isTableActorMode b
 						}
 						return errors.Trace(err)
 					}
+					metricsSorterMnt.Observe(time.Since(startTime).Seconds())
 					// We calculate memory consumption by RowChangedEvent size.
 					// It's much larger than RawKVEntry.
 					size := uint64(msg.Row.ApproximateBytes())
@@ -240,6 +248,7 @@ func (n *sorterNode) StartActorNode(ctx pipeline.NodeContext, isTableActorMode b
 					lastSendResolvedTsTime = time.Now()
 				}
 				ctx.SendToNextNode(pipeline.PolymorphicEventMessage(msg))
+				metricsSorterOut.Observe(time.Since(startTime).Seconds())
 			}
 		}
 	})

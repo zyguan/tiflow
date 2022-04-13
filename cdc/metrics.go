@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/tiflow/cdc/sorter/leveldb"
 	"github.com/pingcap/tiflow/cdc/sorter/memory"
 	"github.com/pingcap/tiflow/cdc/sorter/unified"
+	"github.com/pingcap/tiflow/debug"
 	"github.com/pingcap/tiflow/pkg/actor"
 	"github.com/pingcap/tiflow/pkg/db"
 	"github.com/pingcap/tiflow/pkg/etcd"
@@ -59,4 +60,6 @@ func init() {
 	leveldb.InitMetrics(registry)
 	redowriter.InitMetrics(registry)
 	db.InitMetrics(registry)
+	// Debug metrics
+	debug.InitMetrics(registry)
 }

@@ -13,7 +13,11 @@
 
 package pipeline
 
-import "github.com/pingcap/tiflow/pkg/context"
+import (
+	"github.com/pingcap/tiflow/debug"
+	"github.com/pingcap/tiflow/pkg/context"
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 // NodeContext adds two functions to `context.Context` and is created by pipeline
 type NodeContext interface {
@@ -29,6 +33,8 @@ type nodeContext struct {
 	context.Context
 	msg      Message
 	outputCh chan<- Message
+
+	metricsOutputChanSize prometheus.Gauge
 }
 
 // NewNodeContext returns a new NodeContext.
@@ -40,6 +46,16 @@ func NewNodeContext(ctx context.Context, msg Message, outputCh chan<- Message) N
 	}
 }
 
+func NewNodeContextWithName(ctx context.Context, name string, msg Message, outputCh chan<- Message) NodeContext {
+	table, _ := ctx.Value("metrics.table").(string)
+	return &nodeContext{
+		Context:  ctx,
+		msg:      msg,
+		outputCh: outputCh,
+		metricsOutputChanSize: debug.InspectChanSize.WithLabelValues(ctx.ChangefeedVars().ID, table, "node."+name+".output"),
+	}
+}
+
 func (ctx *nodeContext) Message() Message {
 	return ctx.msg
 }
@@ -47,6 +63,9 @@ func (ctx *nodeContext) Message() Message {
 func (ctx *nodeContext) SendToNextNode(msg Message) {
 	// The header channel should never be blocked
 	ctx.outputCh <- msg
+	if ctx.metricsOutputChanSize != nil {
+		ctx.metricsOutputChanSize.Inc()
+	}
 }
 
 type messageContext struct {
