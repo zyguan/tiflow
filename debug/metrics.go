@@ -8,14 +8,14 @@ var (
 			Namespace: "ticdc",
 			Subsystem: "inspect",
 			Name:      "flow_blocking_duration_seconds",
-			Buckets:   prometheus.ExponentialBuckets(0.01, 2, 18),
+			Buckets:   prometheus.ExponentialBuckets(0.001, 2, 18),
 		}, []string{"changefeed", "table"})
 	InspectDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "ticdc",
 			Subsystem: "inspect",
 			Name:      "duration_seconds",
-			Buckets:   prometheus.ExponentialBuckets(0.01, 2, 18),
+			Buckets:   prometheus.ExponentialBuckets(0.00001, 2, 18),
 		}, []string{"changefeed", "table", "type"})
 	InspectChanSize = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
